@@ -33,7 +33,7 @@ func TestTampering(t *testing.T) {
 	client := newClient(proxiedURL, 100*time.Millisecond)
 	resp, err := client.Get("http://255.0.0.1") // it's reserved for future use so will always time out
 	if assert.NoError(t, err, "should have no error when dial a timeout host") {
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 		assert.True(t, wlTemporarily("255.0.0.1:80"), "should be added to whitelist if dialing times out")
 		assertContent(t, resp, detourMsg, "should detour if dialing times out")
 	}
@@ -155,6 +155,32 @@ func TestIranRules(t *testing.T) {
 	resp, err = client.Get("http://" + iranRedirectAddr)
 	if assert.NoError(t, err, "should not error if dns hijacked in Iran") {
 		assertContent(t, resp, detourMsg, "should detour if dns hijacked in Iran")
+	}
+}
+
+func TestGetAddr(t *testing.T) {
+	defer stopMockServers()
+	mockURL, _ := newMockServer(directMsg)
+	proxiedURL, _ := newMockServer(detourMsg)
+	u, _ := url.Parse(mockURL)
+	d := Dialer(func(network, addr string) (net.Conn, error) {
+		u, _ := url.Parse(proxiedURL)
+		return net.Dial("tcp", u.Host)
+	})
+	c1, e1 := d("tcp", u.Host)
+	if assert.NoError(t, e1, "should dial server") {
+		assert.Equal(t, "tcp", c1.LocalAddr().Network())
+		assert.NotEmpty(t, c1.LocalAddr().String())
+		assert.Equal(t, "tcp", c1.RemoteAddr().Network())
+		assert.Equal(t, u.Host, c1.RemoteAddr().String(), "should get remote address of direct connection")
+	}
+	c2, e2 := d("tcp", "invalid:80")
+	u2, _ := url.Parse(proxiedURL)
+	if assert.NoError(t, e2, "should dial server") {
+		assert.Equal(t, "tcp", c2.LocalAddr().Network())
+		assert.NotEmpty(t, c2.LocalAddr().String())
+		assert.Equal(t, "tcp", c2.RemoteAddr().Network())
+		assert.Equal(t, u2.Host, c2.RemoteAddr().String(), "should get remote address of detour connection")
 	}
 }
 
